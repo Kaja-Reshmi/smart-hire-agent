@@ -1,0 +1,539 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMART HIRE | AI Job Search Agent</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            color: #20283b;
+        }
+
+        header {
+            background: #172554;
+            color: white;
+            padding: 24px 6%;
+        }
+
+        header h1 { margin: 0 0 8px; }
+        header p { margin: 0; color: #cbd5e1; }
+
+        main {
+            max-width: 1150px;
+            margin: 28px auto;
+            padding: 0 20px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+
+        .card, .panel {
+            background: white;
+            padding: 22px;
+            border-radius: 12px;
+            box-shadow: 0 3px 14px #1725540d;
+        }
+
+        .stat-number {
+            font-size: 28px;
+            font-weight: bold;
+            color: #4f46e5;
+        }
+
+        .panel { margin-top: 22px; }
+        h2 { margin-top: 0; }
+
+        .search-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d8deea;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover { background: #3730a3; }
+        button.secondary { background: #e0e7ff; color: #312e81; }
+        button.danger { background: #fee2e2; color: #991b1b; }
+
+        .job {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 18px;
+            margin-top: 14px;
+        }
+
+        .job h3 { margin: 0 0 8px; }
+        .muted { color: #64748b; font-size: 14px; }
+        .job-actions { display: flex; gap: 10px; margin-top: 14px; }
+        .job-actions button { width: auto; }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 9px;
+            border-radius: 20px;
+            background: #dcfce7;
+            color: #166534;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .message { margin-top: 14px; color: #475569; }
+        .error { color: #b91c1c; }
+        .loading { color: #4f46e5; }
+
+        footer {
+            text-align: center;
+            padding: 25px;
+            color: #64748b;
+        }
+
+        @media (max-width: 500px) {
+            .job-actions { flex-direction: column; }
+            .job-actions button { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>SMART HIRE</h1>
+    <p>Your AI-powered job search and recommendation assistant</p>
+</header>
+
+<main>
+    <section class="stats">
+        <div class="card">
+            <div class="muted">Available Jobs</div>
+            <div class="stat-number" id="jobCount">—</div>
+        </div>
+        <div class="card">
+            <div class="muted">Tracked Applications</div>
+            <div class="stat-number" id="applicationCount">—</div>
+        </div>
+        <div class="card">
+            <div class="muted">Interviews</div>
+            <div class="stat-number" id="interviewCount">—</div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Find Your Next Opportunity</h2>
+        <form id="searchForm" class="search-form">
+            <input id="keyword" placeholder="Job title or company">
+            <input id="location" placeholder="Location, e.g. Bengaluru">
+            <input id="skill" placeholder="Skill, e.g. Python">
+            <button type="submit">Search Jobs</button>
+        </form>
+        <p id="searchMessage" class="message"></p>
+    </section>
+
+    <section class="panel">
+        <h2>Recommended Jobs</h2>
+        <p class="muted">Enter your skills to rank jobs by skill match.</p>
+        <form id="matchForm" class="search-form">
+            <input id="skills" placeholder="Python, SQL, Machine Learning" required>
+            <input id="matchLocation" placeholder="Preferred location (optional)">
+            <button type="submit">Find Matches</button>
+        </form>
+        <div id="jobResults" class="message">Loading jobs...</div>
+    </section>
+
+    <section class="panel">
+        <h2>Upload Your Resume</h2>
+        <p class="muted">Upload a PDF or DOCX to find jobs matching your skills.</p>
+        <form id="resumeForm" class="search-form">
+            <input id="resumeFile" type="file" accept=".pdf,.docx" required>
+            <input id="resumeLocation" placeholder="Preferred location (optional)">
+            <button type="submit">Analyze Resume</button>
+        </form>
+        <div id="resumeResults" class="message"></div>
+    </section>
+
+    <section class="panel">
+        <h2>My Applications</h2>
+        <button id="refreshApplications" type="button" class="secondary">
+            Refresh Applications
+        </button>
+        <div id="applicationResults" class="message">Loading applications...</div>
+    </section>
+</main>
+
+<footer>SMART HIRE AI Job Search Agent · Personal Project</footer>
+
+<script>
+    const API = "http://127.0.0.1:8000";
+
+    // Pagination: display 10 jobs at a time.
+    let currentJobs = [];
+    let currentShowMatch = false;
+    let visibleJobCount = 10;
+    const JOBS_PER_PAGE = 10;
+
+    async function apiRequest(path, options = {}) {
+        const response = await fetch(`${API}${path}`, options);
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Request failed (${response.status})`);
+        }
+
+        return response.json();
+    }
+
+    function escapeHTML(value) {
+        return String(value ?? "").replace(/[&<>"']/g, char => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;"
+        })[char]);
+    }
+
+    function showMessage(id, message, isError = false) {
+        const element = document.getElementById(id);
+        element.textContent = message;
+        element.className = isError ? "message error" : "message";
+    }
+
+    async function loadDashboard() {
+        try {
+            const [jobs, applications] = await Promise.all([
+                apiRequest("/jobs?limit=500"),
+                apiRequest("/applications")
+            ]);
+
+            document.getElementById("jobCount").textContent =
+                jobs.jobs.length;
+
+            document.getElementById("applicationCount").textContent =
+                applications.total;
+
+            document.getElementById("interviewCount").textContent =
+                applications.applications.filter(
+                    item => item.status === "Interview"
+                ).length;
+
+            displayApplications(applications.applications);
+            displayJobs(jobs.jobs, false);
+
+        } catch (error) {
+            showMessage(
+                "jobResults",
+                "Could not connect to the backend. Start your FastAPI server and refresh.",
+                true
+            );
+            showMessage("applicationResults", error.message, true);
+        }
+    }
+
+    function displayJobs(jobs, showMatch) {
+        currentJobs = Array.isArray(jobs) ? jobs : [];
+        currentShowMatch = showMatch;
+        visibleJobCount = JOBS_PER_PAGE;
+        renderVisibleJobs();
+    }
+
+    function renderVisibleJobs() {
+        const container = document.getElementById("jobResults");
+
+        if (!currentJobs.length) {
+            container.textContent = "No jobs found. Try different search terms.";
+            return;
+        }
+
+        const visibleJobs = currentJobs.slice(0, visibleJobCount);
+
+        container.innerHTML = `
+            <p class="muted">
+                Showing ${visibleJobs.length} of ${currentJobs.length} job(s).
+            </p>
+
+            ${visibleJobs.map(job => `
+                <article class="job">
+                    <h3>${escapeHTML(job.title)}</h3>
+                    <div><strong>${escapeHTML(job.company)}</strong></div>
+
+                    <p class="muted">
+                        ${escapeHTML(job.location)} ·
+                        ${escapeHTML(job.experience_level)}
+                    </p>
+
+                    ${currentShowMatch ? `
+                        <span class="badge">
+                            ${Number(job.match_percentage || 0)}% skill match
+                        </span>
+
+                        ${Array.isArray(job.missing_skills) && job.missing_skills.length ? `
+                            <p>
+                                <strong>Skills to learn:</strong>
+                                ${escapeHTML(job.missing_skills.join(", "))}
+                            </p>
+                        ` : `
+                            <p class="muted">
+                                No missing required skills were identified by the matcher.
+                            </p>
+                        `}
+
+                        ${Array.isArray(job.matched_skills) && job.matched_skills.length ? `
+                            <p class="muted">
+                                <strong>Matched skills:</strong>
+                                ${escapeHTML(job.matched_skills.join(", "))}
+                            </p>
+                        ` : ""}
+
+                        ${Array.isArray(job.related_skills) && job.related_skills.length ? `
+                            <p class="muted">
+                                <strong>Related skills:</strong>
+                                ${escapeHTML(job.related_skills.join(", "))}
+                            </p>
+                        ` : ""}
+                    ` : ""}
+                    ${job.agent_advice ? `
+    <p><strong>SMART HIRE advice:</strong>
+        ${escapeHTML(job.agent_advice)}
+    </p>
+` : ""}
+
+                    <p>${escapeHTML(job.description)}</p>
+
+                    <p class="muted">
+                        Skills: ${escapeHTML(job.required_skills)}
+                    </p>
+
+                    <div class="job-actions">
+                        <button onclick="saveJob(${Number(job.id)})">
+                            Save Job
+                        </button>
+                    </div>
+                </article>
+            `).join("")}
+
+            ${visibleJobCount < currentJobs.length ? `
+                <div class="job-actions">
+                    <button id="loadMoreJobs" type="button" class="secondary">
+                        Load More Jobs (${currentJobs.length - visibleJobCount} remaining)
+                    </button>
+                </div>
+            ` : ""}
+        `;
+
+        const loadMoreButton = document.getElementById("loadMoreJobs");
+
+        if (loadMoreButton) {
+            loadMoreButton.addEventListener("click", () => {
+                visibleJobCount += JOBS_PER_PAGE;
+                renderVisibleJobs();
+            });
+        }
+    }
+
+    async function saveJob(jobId) {
+        try {
+            await apiRequest(
+                `/applications?job_id=${jobId}&status=Saved`,
+                { method: "POST" }
+            );
+
+            alert("Job saved to your applications!");
+            await loadDashboard();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    document.getElementById("searchForm").addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const params = new URLSearchParams({
+            keyword: document.getElementById("keyword").value,
+            location: document.getElementById("location").value,
+            skill: document.getElementById("skill").value
+        });
+
+        try {
+            showMessage("searchMessage", "Searching...");
+
+            const result = await apiRequest(`/jobs/search?${params}`);
+
+            document.getElementById("searchMessage").textContent =
+                `${result.total_found} job(s) found.`;
+
+            displayJobs(result.jobs, false);
+
+        } catch (error) {
+            showMessage("searchMessage", error.message, true);
+        }
+    });
+
+    
+document.getElementById("matchForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const params = new URLSearchParams({
+        skills: document.getElementById("skills").value,
+        location: document.getElementById("matchLocation").value,
+        limit: "100"
+    });
+
+    try {
+        showMessage("searchMessage", "SMART HIRE agent is analyzing jobs...");
+
+        const result = await apiRequest(`/agent/recommend?${params}`);
+
+        document.getElementById("searchMessage").textContent =
+            `SMART HIRE analyzed ${result.jobs_analyzed} jobs and found ${result.recommendations.length} recommendations.`;
+
+        displayJobs(result.recommendations || [], true);
+
+    } catch (error) {
+        showMessage("searchMessage", error.message, true);
+    }
+});
+
+
+    document.getElementById("resumeForm").addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const file = document.getElementById("resumeFile").files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const location = document.getElementById("resumeLocation").value;
+        const params = new URLSearchParams({ location, limit: "100" });
+
+        try {
+            showMessage("resumeResults", "Analyzing your resume...");
+
+            const result = await apiRequest(
+                `/resume/upload?${params}`,
+                { method: "POST", body: formData }
+            );
+
+            document.getElementById("resumeResults").textContent =
+                `Skills found: ${(result.skills_found || []).join(", ") || "None"}`;
+
+            displayJobs(result.recommendations || [], true);
+
+        } catch (error) {
+            showMessage("resumeResults", error.message, true);
+        }
+    });
+
+    function displayApplications(applications) {
+        const container = document.getElementById("applicationResults");
+
+        if (!applications.length) {
+            container.textContent =
+                "No tracked applications yet. Save a job to get started.";
+            return;
+        }
+
+        container.innerHTML = applications.map(item => `
+            <article class="job">
+                <h3>${escapeHTML(item.title)}</h3>
+
+                <div>
+                    ${escapeHTML(item.company)} ·
+                    ${escapeHTML(item.location)}
+                </div>
+
+                <p>
+                    Status: <strong>${escapeHTML(item.status)}</strong>
+                </p>
+
+                <label for="status-${item.application_id}">
+                    Update status
+                </label>
+
+                <select id="status-${item.application_id}">
+                    ${["Saved", "Applied", "Interview", "Rejected", "Offered"].map(status => `
+                        <option value="${status}"
+                            ${item.status === status ? "selected" : ""}>
+                            ${status}
+                        </option>
+                    `).join("")}
+                </select>
+
+                <div class="job-actions">
+                    <button onclick="updateStatus(${item.application_id})">
+                        Update
+                    </button>
+
+                    <button class="danger"
+                        onclick="removeApplication(${item.application_id})">
+                        Delete
+                    </button>
+                </div>
+            </article>
+        `).join("");
+    }
+
+    async function updateStatus(applicationId) {
+        const status =
+            document.getElementById(`status-${applicationId}`).value;
+
+        const params = new URLSearchParams({ status });
+
+        try {
+            await apiRequest(
+                `/applications/${applicationId}/status?${params}`,
+                { method: "PATCH" }
+            );
+
+            await loadDashboard();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    async function removeApplication(applicationId) {
+        if (!confirm("Delete this tracked application?")) return;
+
+        try {
+            await apiRequest(
+                `/applications/${applicationId}`,
+                { method: "DELETE" }
+            );
+
+            await loadDashboard();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    }
+
+    document.getElementById("refreshApplications").addEventListener(
+        "click", loadDashboard
+    );
+
+    loadDashboard();
+</script>
+</body>
+</html>
